@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>GSV 트레이닝 스토어 3D</title>
+<title>GST AI 메타버스 Proto</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jua&family=Noto+Sans+KR:wght@400;500;700&display=swap">
@@ -68,6 +68,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 .grade-row { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
 .grade { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; font-family: var(--display); font-size: 24px; color: #fff; flex: none; }
 .grade.S { background: #7c3aed; } .grade.A { background: #16a34a; } .grade.B { background: #f97316; } .grade.C { background: #dc2626; }
+
+.proto { font-family: var(--body); font-size: 13px; font-weight: 700; color: #fff; background: var(--alert); border-radius: 6px; padding: 2px 7px; vertical-align: middle; letter-spacing: .02em; }
 
 /* 게임 화면 */
 .game { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; align-items: start; }
@@ -168,8 +170,8 @@ aside h3 { font-family: var(--display); font-weight: 400; font-size: 18px; margi
 <body>
 <div class="app">
   <header class="top">
-    <h1><b>GSV</b> 트레이닝 스토어</h1>
-    <p>가상 매장에서 고객의 소리를 응대하고 GSV AI에 등록하는 연습</p>
+    <h1><b>GST AI</b> 메타버스 <small class="proto">Proto</small></h1>
+    <p>가상 매장에서 GST AI 고객 응대를 연습해요</p>
   </header>
 
   <section class="create" id="create">
@@ -308,8 +310,12 @@ const STORES = [
   ['롯데백화점', '강남점', '생식품'], ['롯데백화점', '잠실점', '생식품'],
   ['스타필드시티', '위례점', ''], ['스타필드시티', '부천점', ''], ['스타필드시티', '명지점', '']
 ].map(([b, n, part]) => ({ b, n, part, id: [b, n, part].join('|') }));
-const storeOf = id => STORES.find(s => s.id === id) || null;
-const storeLabel = s => s ? `${s.b.replace('백화점', '')} ${s.n}${s.part ? ' · ' + s.part : ''}` : '';
+const CUSTOM = '직접 입력';
+const storeOf = id => {
+  if (typeof id === 'string' && id.startsWith(CUSTOM + '|')) { const n = id.slice(CUSTOM.length + 1).trim(); return n ? { b: CUSTOM, n, part: '', id } : null; }
+  return STORES.find(s => s.id === id) || null;
+};
+const storeLabel = s => !s ? '' : s.b === CUSTOM ? s.n : `${s.b.replace('백화점', '')} ${s.n}${s.part ? ' · ' + s.part : ''}`;
 const CTYPES = [
   { type: '급한 직장인(30대)', desc: "점심시간에 온 바쁜 30대 직장인. 말이 빠르고 짧게 끊어서 말함. '빨리요', '시간 없어요' 자주 씀" },
   { type: '꼼꼼한 주부(40대)', desc: '영수증과 상품을 꼼꼼히 따지는 40대 주부. 논리적으로 조목조목 따지며 근거를 요구함' },
@@ -505,7 +511,7 @@ $('nameInput').oninput = () => { $('pname').textContent = ($('nameInput').value.
 if (hadSave) { $('continueBtn').hidden = false; $('startBtn').textContent = '새로 시작'; }
 function needStore() {
   if (storeOf(S.store)) { $('createMsg').hidden = true; return false; }
-  $('createMsg').textContent = '근무하는 점포를 골라 주세요.'; $('createMsg').hidden = false; $('brandSeg').scrollIntoView({ block: 'center', behavior: 'smooth' }); return true;
+  $('createMsg').textContent = selBrand === CUSTOM ? '점포명을 입력해 주세요.' : '근무하는 점포를 골라 주세요.'; $('createMsg').hidden = false; $('brandSeg').scrollIntoView({ block: 'center', behavior: 'smooth' }); return true;
 }
 $('startBtn').onclick = () => {
   if (needStore()) return;
@@ -515,8 +521,15 @@ $('startBtn').onclick = () => {
 $('continueBtn').onclick = () => { if (needStore()) return; S.name = $('nameInput').value.trim() || S.name; save(); enterGame(); };
 let selBrand = (storeOf(S.store) || {}).b || null;
 function renderStores() {
-  $('brandSeg').innerHTML = BRANDS.map(b => `<button type="button" data-b="${b}" aria-pressed="${b === selBrand}">${b}</button>`).join('');
-  $('brandSeg').querySelectorAll('button').forEach(x => x.onclick = () => { selBrand = x.dataset.b; renderStores(); });
+  $('brandSeg').innerHTML = BRANDS.concat(CUSTOM).map(b => `<button type="button" data-b="${b}" aria-pressed="${b === selBrand}">${b}</button>`).join('');
+  $('brandSeg').querySelectorAll('button').forEach(x => x.onclick = () => { selBrand = x.dataset.b; renderStores(); if (selBrand === CUSTOM) $('storeInput').focus(); });
+  if (selBrand === CUSTOM) {
+    const cur = storeOf(S.store), val = cur && cur.b === CUSTOM ? cur.n : '';
+    $('storeSeg').hidden = false;
+    $('storeSeg').innerHTML = `<input type="text" id="storeInput" maxlength="30" placeholder="점포명을 입력해 주세요" value="${esc(val)}">`;
+    $('storeInput').oninput = e => { const v = e.target.value.trim(); S.store = v ? CUSTOM + '|' + v : null; if (v) $('createMsg').hidden = true; };
+    return;
+  }
   const list = STORES.filter(st => st.b === selBrand);
   $('storeSeg').innerHTML = selBrand ? list.map(st => `<button type="button" class="chip" data-id="${st.id}" aria-pressed="${st.id === S.store}">${st.n}${st.part ? `<small>${st.part}</small>` : ''}</button>`).join('') : '';
   $('storeSeg').hidden = !selBrand;
@@ -624,7 +637,7 @@ function buildRoom(th) {
   const door = sign('출입구', 1.2, 0.3, { w: 256, h: 64, size: 40, bg: th.accent }); door.position.set(0, 3.2, 6.27); Z.add(door);
   // 구역 간판
   const j = JOBS[th.job];
-  const main = sign(j.place, 4.6, 1.0, { w: 768, h: 168, size: 78, bg: th.signBg || '#ffffff', fg: th.signFg || th.accent, border: th.signFg || th.accent, sub: 'GSV 트레이닝 스토어', subSize: 34, subFg: '#5d6b66', radius: 26 });
+  const main = sign(j.place, 4.6, 1.0, { w: 768, h: 168, size: 78, bg: th.signBg || '#ffffff', fg: th.signFg || th.accent, border: th.signFg || th.accent, sub: 'GST AI 메타버스', subSize: 34, subFg: '#5d6b66', radius: 26 });
   main.position.set(0, 2.45, -5.98); Z.add(main);
 }
 
