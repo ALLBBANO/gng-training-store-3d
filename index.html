@@ -67,6 +67,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 .scen { font-size: 13px; color: var(--muted); background: var(--floor); border-radius: 10px; padding: 6px 12px; }
 .grade-row { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
 .grade { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; font-family: var(--display); font-size: 24px; color: #fff; flex: none; }
+.grade.sm { width: 24px; height: 24px; font-size: 14px; }
 .grade.S { background: #7c3aed; } .grade.A { background: #16a34a; } .grade.B { background: #f97316; } .grade.C { background: #dc2626; }
 
 .proto { font-family: var(--body); font-size: 13px; font-weight: 700; color: #fff; background: var(--alert); border-radius: 6px; padding: 2px 7px; vertical-align: middle; letter-spacing: .02em; }
@@ -230,25 +231,25 @@ aside h3 { font-family: var(--display); font-weight: 400; font-size: 18px; margi
         <h3>오늘의 근무</h3>
         <div class="stats">
           <div class="stat"><b id="stSolved">0</b><span>응대</span></div>
-          <div class="stat"><b id="stGsv">0</b><span>GSV 등록</span></div>
-          <div class="stat"><b id="stAcc">-</b><span>분류 정확도</span></div>
+          <div class="stat"><b id="stAvg">-</b><span>평균 점수</span></div>
+          <div class="stat"><b id="stBest">-</b><span>최고 점수</span></div>
         </div>
       </div>
-      <div class="goal" id="goal"></div>
       <div>
-        <h3>GSV AI 등록 기준</h3>
+        <h3>GST 평가 기준</h3>
         <ul class="rule">
-          <li>고객의 소리(컴플레인·의견·건의) 접수 시</li>
-          <li>고객사의 컴플레인·의견·건의 접수 시</li>
-          <li>사원 간 컴플레인·의견·건의 접수 시</li>
-          <li>현장팀장 주 2회 이상 필수 등록</li>
+          <li>고객 공감 및 경청 (30점)</li>
+          <li>문제 해결 능력 (30점)</li>
+          <li>매장 정책 준수 (20점)</li>
+          <li>전문성 및 태도 (20점)</li>
+          <li>S 98점 이상 · A 85점 이상 · B 70점 이상 · C 70점 미만</li>
         </ul>
       </div>
       <div>
-        <h3>등록 기록</h3>
-        <ul class="log" id="log"><li><span class="empty">아직 등록한 VOC가 없어요.</span></li></ul>
+        <h3>응대 기록</h3>
+        <ul class="log" id="log"><li><span class="empty">아직 응대 기록이 없어요.</span></li></ul>
       </div>
-      <div class="actions"><button class="btn ghost" id="editBtn">캐릭터 바꾸기</button></div>
+      <div class="actions"><button class="btn ghost" id="editBtn">처음 화면</button></div>
     </aside>
   </section>
 </div>
@@ -272,7 +273,7 @@ window.__gsvReady = true;
 const $ = id => document.getElementById(id);
 const HAIRS = ['#2b2420', '#6b3f22', '#c98b3a', '#8c8f94', '#3b4a8a'];
 const APRONS = ['#11665e', '#c2412b', '#2e5aa8', '#7a4fa3', '#d08a10'];
-const TITLES = ['신입 사원', '성실 사원', '베테랑', '현장 리더', '현장팀장', 'GSV 마스터'];
+const TITLES = ['신입 사원', '성실 사원', '베테랑', '현장 리더', '현장팀장', 'GST 마스터'];
 const TYPES = { '컴플레인': '불편·불만', '의견': '칭찬·평가', '건의': '개선 요청' };
 const FROMS = ['고객', '고객사', '사원'];
 const STORE_KEY = 'gsv-training-store-v1';
@@ -1222,7 +1223,7 @@ function refreshPlayerMesh() {
 function enterGame() {
   $('create').hidden = true; $('game').hidden = false;
   if (builtRole !== S.role) buildZone(S.role);
-  genQueue = [];
+  genQueue = []; genCount = 0;
   sizeStage();
   clearPeople();
   P = { x: ZONE.start.x, z: ZONE.start.z, face: ZONE.start.face || 0, route: [] };
@@ -1267,6 +1268,7 @@ ${foreign ? '한국어와 영어를 자연스럽게 섞어서 말할 것.\n' : '
 - 시나리오 내용을 그대로 읽지 말 것. 실제 고객처럼 자연스럽게 말할 것.
 - 내 유형 말투 특성 반드시 반영할 것.
 - 2~3문장 이내로 짧고 임팩트 있게.
+- 상품명, 금액, 날짜·시간, 수량처럼 구체적인 디테일을 1~2개 넣어서 실제 상황처럼 생생하게.
 - 별표 액션 표현 절대 금지. 교육/훈련/AI 언급 금지.
 - 상황 설명이 아닌 실제 대화체로. 고객의 말만 출력.`;
   const r = await samp(prompt, { modelTier: 'quick' });
@@ -1284,10 +1286,18 @@ async function serverScenario(role, lv) {
   const sc = generateScenario(role, lv);
   return Object.assign(sc, { ctype: d.scenario.customer_type, cdesc: d.scenario.customer_desc, situation: d.scenario.situation, emotion: d.scenario.emotion, say: d.message, server: d.scenario });
 }
+// 근무 시작 후 처음 2명은 토큰을 쓰지 않는다 (규칙으로 상황 선택 + 기본 첫마디 + 규칙 채점).
+const FREE_FIRST = 2; let genCount = 0;
+function freeScenario(role, lv) {
+  const sc = generateScenario(role, lv); sc.free = true;
+  sc.say = OPENING_FALLBACK; return sc;
+}
 async function refillScenarios() {
   if (genBusy) return;
   const role = S.role, lv = curDiff(), same = () => role === S.role && lv === curDiff();
   while (genQueue.length < 2 && same()) {
+    if (genCount < FREE_FIRST) { genCount++; genQueue.push(freeScenario(role, lv)); continue; }
+    genCount++;
     if (SERVER && !serverOff) {
       genBusy = true; let sc = null;
       try { sc = await serverScenario(role, lv); } catch (e) { serverOff = true; }
@@ -1521,12 +1531,25 @@ function showResult(p, res, myText) {
   const s = res.grade === 'S' || res.grade === 'A' ? 2 : res.grade === 'B' ? 1 : 0;
   const gain = [0, 12, 30][s], dc = [-8, 1, 6][s];
   S.xp += gain; S.csat = Math.max(0, Math.min(100, S.csat + dc)); p.score = s;
+  S.solved = (S.solved || 0) + 1; S.total = (S.total || 0) + res.score; S.best = Math.max(S.best || 0, res.score);
+  S.log = (S.log || []).filter(l => l.g); S.log.unshift({ g: res.grade, sc: res.score, title: p.sc.situation, lv: p.sc.lv }); S.log = S.log.slice(0, 6);
+  const lvBefore = S.level; while (S.xp >= need(S.level)) { S.xp -= need(S.level); S.level += 1; }
+  const lvUp = S.level > lvBefore;
   dlg.innerHTML = speakerHtml(p.sc) +
     `<div class="mine"><span class="label">내 응대</span><p>${esc(myText)}</p></div>
      <div class="fb g${s}"><div class="grade-row"><span class="grade ${res.grade}">${res.grade}</span><b>${res.score}점 · ${GRADE_LABELS[res.grade]} · +${gain} XP</b></div><p>${esc(res.feedback)}</p></div>
      <div class="src">${esc(res.src)}</div>
-     <button class="btn" id="toGsv">GSV AI에 등록하기</button>`;
-  $('toGsv').onclick = () => gsvForm(p); $('toGsv').focus();
+     ${lvUp ? `<div class="fb g2"><b>레벨 업! Lv.${S.level} ${titleOf(S.level)}</b>${S.level >= 6 ? '왕관을 얻었어요. 이제 GST 마스터예요.' : S.level >= 5 ? '이름표가 금색으로 바뀌었어요.' : '경험이 쌓이고 있어요.'}</div>` : ''}
+     <button class="btn" id="nextBtn">다음 손님</button>`;
+  $('nextBtn').focus();
+  $('nextBtn').onclick = () => {
+    $('modal').hidden = true; paused = false; last = performance.now();
+    const happy = s >= 1;
+    leave(p, happy ? 'happy' : 'sad');
+    float(p.x, p.z, happy ? '고마워요!' : '다음엔 잘해 주세요', happy ? '#2f8f4e' : '#e2553b');
+    if (lvUp) { toast('레벨 업! ' + titleOf(S.level)); refreshPlayerMesh(); }
+    updateUI(); save();
+  };
   updateUI(); save();
 }
 
@@ -1551,6 +1574,7 @@ C등급: 70점 미만 (추가 교육 필요)
 피드백: [3~5문장. 잘한 점과 개선점 모두 포함]`;
 const scoreToGrade = sc => sc >= 98 ? 'S' : sc >= 85 ? 'A' : sc >= 70 ? 'B' : 'C';
 async function judge(sc, text) {
+  if (sc.free) return Object.assign(ruleEvaluate([text]), { src: '규칙 채점' });
   if (SERVER && !serverOff) {
     try {
       const r = await fetch('/api/evaluate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ job_type: S.role, difficulty: sc.lv, scenario: sc.server || { situation: sc.situation, customer_type: sc.ctype }, messages: [{ role: 'assistant', content: sc.say }, { role: 'user', content: text }] }) });
@@ -1592,41 +1616,6 @@ function ruleEvaluate(staffMsgs) {
   return { score, grade, feedback: fb[grade] };
 }
 
-function gsvForm(p) {
-  const sc = p.sc; let ty = null, fr = null;
-  dlg.innerHTML = `<div class="gsv-head"><span>GSV AI</span>VOC 등록</div>
-    <p class="say" style="font-size:15px">${esc(sc.title)}: “${esc(sc.say)}”</p>
-    <div class="field"><span class="label">유형</span><div class="seg" id="segT">${Object.entries(TYPES).map(([k, v]) => `<button data-v="${k}" aria-pressed="false">${k}<small>${v}</small></button>`).join('')}</div></div>
-    <div class="field"><span class="label">접수 대상</span><div class="seg" id="segF">${FROMS.map(k => `<button data-v="${k}" aria-pressed="false">${k}</button>`).join('')}</div></div>
-    <button class="btn" id="submitGsv" disabled>등록</button>`;
-  const go = () => { $('submitGsv').disabled = !(ty && fr); };
-  dlg.querySelectorAll('#segT button').forEach(b => b.onclick = () => { ty = b.dataset.v; dlg.querySelectorAll('#segT button').forEach(x => x.setAttribute('aria-pressed', x === b)); go(); });
-  dlg.querySelectorAll('#segF button').forEach(b => b.onclick = () => { fr = b.dataset.v; dlg.querySelectorAll('#segF button').forEach(x => x.setAttribute('aria-pressed', x === b)); go(); });
-  dlg.querySelector('#segT button').focus();
-  $('submitGsv').onclick = () => {
-    const okT = ty === sc.gsv[0], okF = fr === sc.gsv[1], both = okT && okF;
-    const gain = both ? 20 : (okT || okF) ? 8 : 0;
-    S.xp += gain; S.gsv += 1; S.solved += 1; if (both) S.correct += 1;
-    S.log.unshift({ t: sc.gsv[0], f: sc.gsv[1], title: sc.title, ok: both }); S.log = S.log.slice(0, 6);
-    const lvBefore = S.level;
-    while (S.xp >= need(S.level)) { S.xp -= need(S.level); S.level += 1; }
-    dlg.innerHTML = `<div class="gsv-head"><span>GSV AI</span>등록 완료</div>
-      <div class="fb ${both ? 'g2' : (okT || okF) ? 'g1' : 'g0'}"><b>${both ? '분류 정확! +20 XP' : '정답은 ' + sc.gsv[0] + ' · ' + sc.gsv[1] + (gain ? ' (+8 XP)' : '')}</b>${esc(sc.note)}</div>
-      ${S.level > lvBefore ? `<div class="fb g2"><b>레벨 업! Lv.${S.level} ${titleOf(S.level)}</b>${S.level >= 6 ? '왕관을 얻었어요. 이제 GSV 마스터예요.' : S.level >= 5 ? '이름표가 금색으로 바뀌었어요.' : '경험이 쌓이고 있어요.'}</div>` : ''}
-      <button class="btn" id="doneBtn">근무 계속하기</button>`;
-    $('doneBtn').focus();
-    $('doneBtn').onclick = () => {
-      $('modal').hidden = true; paused = false; last = performance.now();
-      const happy = p.score >= 1;
-      leave(p, happy ? 'happy' : 'sad');
-      float(p.x, p.z, happy ? '고마워요!' : '다음엔 잘해 주세요', happy ? '#2f8f4e' : '#e2553b');
-      if (S.level > lvBefore) { toast('레벨 업! ' + titleOf(S.level)); refreshPlayerMesh(); }
-      updateUI(); save();
-    };
-    updateUI(); save();
-  };
-}
-
 // ---------- UI ----------
 let toastT;
 function toast(msg) { const t = $('toast'); t.textContent = msg; t.hidden = false; t.style.opacity = 1; clearTimeout(toastT); toastT = setTimeout(() => { t.style.opacity = 0; setTimeout(() => t.hidden = true, 300); }, 2200); }
@@ -1636,11 +1625,10 @@ function updateUI() {
   $('hudStore').textContent = storeLabel(storeOf(S.store)) + ' · 난이도 ' + (S.diff || 1) + '단계';
   $('xpText').textContent = S.xp + ' / ' + need(S.level); $('xpBar').style.width = (S.xp / need(S.level) * 100) + '%';
   $('csatText').textContent = S.csat + '점'; $('csatBar').style.width = S.csat + '%';
-  $('stSolved').textContent = S.solved; $('stGsv').textContent = S.gsv;
-  $('stAcc').textContent = S.gsv ? Math.round(S.correct / S.gsv * 100) + '%' : '-';
-  const g = $('goal'); g.className = 'goal' + (S.gsv >= 2 ? ' done' : '');
-  g.textContent = S.gsv >= 2 ? '주 2회 등록 기준 달성! 계속 등록해 보세요.' : `주 2회 등록 기준까지 ${2 - S.gsv}건 남았어요.`;
-  $('log').innerHTML = S.log.length ? S.log.map(l => `<li><span class="chip ${l.t === '컴플레인' ? 'c' : l.t === '의견' ? 's' : ''}">${l.t} · ${l.f}</span><span>${esc(l.title)}${l.ok ? '' : ' <small style="color:var(--alert)">(분류 수정됨)</small>'}</span></li>`).join('') : '<li><span class="empty">아직 등록한 VOC가 없어요.</span></li>';
+  const n = S.solved || 0;
+  $('stSolved').textContent = n; $('stAvg').textContent = n ? Math.round((S.total || 0) / n) + '점' : '-'; $('stBest').textContent = n ? (S.best || 0) + '점' : '-';
+  const lg = (S.log || []).filter(l => l.g);
+  $('log').innerHTML = lg.length ? lg.map(l => `<li><span class="grade ${l.g} sm">${l.g}</span><span>${l.sc}점 · Lv.${l.lv} ${esc(l.title)}</span></li>`).join('') : '<li><span class="empty">아직 응대 기록이 없어요.</span></li>';
 }
 
 // ---------- 시작 ----------
