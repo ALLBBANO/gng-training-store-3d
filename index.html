@@ -1294,33 +1294,14 @@ async function serverScenario(role, lv) {
   const sc = generateScenario(role, lv);
   return Object.assign(sc, { ctype: d.scenario.customer_type, cdesc: d.scenario.customer_desc, situation: d.scenario.situation, emotion: d.scenario.emotion, say: d.message, server: d.scenario });
 }
-// 근무 시작 후 처음 2명은 토큰을 쓰지 않는다 (규칙으로 상황 선택 + 기본 첫마디 + 규칙 채점).
-const FREE_FIRST = 2; let genCount = 0;
-function freeScenario(role, lv) {
-  const sc = generateScenario(role, lv); sc.free = true;
-  sc.say = OPENING_FALLBACK; return sc;
-}
+// 손님 상황은 규칙으로 고르고(토큰 없음), 고객의 1·2번째 말은 규칙 문장, 3번째 말부터 AI가 만든다.
+let genCount = 0;
 async function refillScenarios() {
-  if (genBusy) return;
-  const role = S.role, lv = curDiff(), same = () => role === S.role && lv === curDiff();
-  while (genQueue.length < 2 && same()) {
-    if (genCount < FREE_FIRST) { genCount++; genQueue.push(freeScenario(role, lv)); continue; }
-    genCount++;
-    if (SERVER && !serverOff) {
-      genBusy = true; let sc = null;
-      try { sc = await serverScenario(role, lv); } catch (e) { serverOff = true; }
-      genBusy = false;
-      if (sc) { if (same()) genQueue.push(sc); continue; }
-    }
+  const role = S.role, lv = curDiff();
+  while (genQueue.length < 2) {
     const sc = generateScenario(role, lv);
-    const aiPending = window.claude && typeof window.claude.use === 'function' && !samp && !aiOff;
-    if (aiPending) return;                         // AI 연결 준비 중: 연결되면 다시 채운다
-    if (samp && !aiOff) {
-      genBusy = true;
-      try { sc.say = await aiOpening(role, sc); } catch (e) { if (e && e.code === 'not_granted') aiOff = true; }
-      genBusy = false;
-    }
-    if (same()) genQueue.push(sc);
+    sc.server = { customer_type: sc.ctype, customer_desc: sc.cdesc, situation: sc.situation, emotion: sc.emotion };
+    genQueue.push(sc);
   }
 }
 function nextScenario() { const sc = genQueue.shift(); refillScenarios(); return sc || null; }
@@ -1526,7 +1507,7 @@ function renderTalk(p, typing) {
       <button class="mic" id="micBtn" type="button" aria-label="말로 입력" ${dict && !dictOff ? '' : 'hidden'}>${MIC_SVG}</button></div>
     <div class="partial" id="partial"></div>
     ${t >= 5 ? '<div class="guide">💡 응대가 어느 정도 마무리됐어요. 평가를 받거나 더 연습하고 싶으면 계속 응대해 주세요.</div>' : ''}
-    <div class="actions"><button class="btn" id="sendAns" ${typing ? 'disabled' : ''}>보내기</button>${t >= 3 ? `<button class="btn ghost" id="evalBtn" ${typing ? 'disabled' : ''}>📊 평가 받기</button>` : ''}<span class="turns">${t}회 응대</span></div>`;
+    <div class="actions"><button class="btn" id="sendAns" ${typing ? 'disabled' : ''}>보내기</button>${p.canEval ? `<button class="btn ghost" id="evalBtn" ${typing ? 'disabled' : ''}>📊 평가 받기</button>` : ''}<span class="turns">${t}회 응대</span></div>`;
   $('modal').hidden = false;
   const cb = $('chatbox'); cb.scrollTop = cb.scrollHeight;
   ansBox = $('ans'); micBtn = $('micBtn'); partialEl = $('partial');
@@ -1543,6 +1524,7 @@ function renderTalk(p, typing) {
     if (text.length < 2) { partialEl.textContent = '고객에게 할 말을 적어 주세요.'; ansBox.focus(); return; }
     stopMic();
     p.msgs.push({ role: 'user', content: text }); p.turns++;
+    if ((p.turns >= 3 && goodAnswer(text)) || p.turns >= 6) p.canEval = true;
     renderTalk(p, true);
     let reply;
     try { reply = await customerReply(p); } catch (e) { reply = '(응답 오류. 다시 말씀해 주세요.)'; }
@@ -1557,7 +1539,14 @@ function renderTalk(p, typing) {
     pending.then(res => showResult(p, res));
   };
 }
-// 토큰 없는 손님(처음 2명)의 대답: 직원 말에 공감·해결 표현이 있는지로 고른다.
+// 좋은 대답(토큰 없이 판단): 공감이나 해결 표현이 있고, 거절 표현이 없고, 너무 짧지 않음
+const hangulLen = t => (t.match(/[가-힣]/g) || []).length;
+function goodAnswer(t) {
+  const has = ws => ws.some(w => t.includes(w));
+  return hangulLen(t) >= 6 && !has(['안돼요', '못해요', '어쩔 수 없', '몰라요'])
+    && has(['죄송', '불편', '이해', '공감', '안타깝', '걱정', '힘드셨', '불쾌', '확인', '처리', '도와', '해결', '조치', '안내', '대신', '바꿔']);
+}
+// 고객의 2번째 말(토큰 없음): 직원 말에 공감·해결 표현이 있는지로 고른다.
 function ruleReply(p) {
   const last = p.msgs[p.msgs.length - 1].content, t = p.turns;
   const has = ws => ws.some(w => last.includes(w));
@@ -1573,7 +1562,7 @@ function ruleReply(p) {
 }
 async function customerReply(p) {
   const sc = p.sc;
-  if (sc.free) { await new Promise(r => setTimeout(r, 600)); return ruleReply(p); }
+  if (p.turns <= 1) { await new Promise(r => setTimeout(r, 600)); return ruleReply(p); }
   if (SERVER && !serverOff && sc.server) {
     const r = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ job_type: S.role, difficulty: sc.lv, messages: p.msgs, scenario: sc.server }) });
     const d = await r.json(); if (d.message) return d.message;
@@ -1640,11 +1629,10 @@ C등급: 70점 미만 (추가 교육 필요)
 const scoreToGrade = sc => sc >= 98 ? 'S' : sc >= 85 ? 'A' : sc >= 70 ? 'B' : 'C';
 async function judge(sc, msgs) {
   const staff = msgs.filter(m => m.role === 'user').map(m => m.content);
-  if (sc.free) return Object.assign(ruleEvaluate(staff), { src: '규칙 채점' });
   if (SERVER && !serverOff) {
     try {
       const r = await fetch('/api/evaluate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ job_type: S.role, difficulty: sc.lv, scenario: sc.server || { situation: sc.situation, customer_type: sc.ctype }, messages: msgs }) });
-      if (r.ok) { const d = await r.json(); if (d.grade) return { score: d.score, grade: scoreToGrade(d.score), feedback: d.feedback, src: d.ai ? 'AI 채점' : '규칙 채점' }; }
+      if (r.ok) { const d = await r.json(); if (d.grade) return { score: Math.max(5, d.score), grade: scoreToGrade(Math.max(5, d.score)), feedback: d.feedback, src: d.ai ? 'AI 채점' : '규칙 채점' }; }
     } catch (e) { }
   }
   if (samp && !aiOff) {
@@ -1656,7 +1644,7 @@ async function judge(sc, msgs) {
       const t = (r && (r.text || r.content)) || String(r || '');
       const scoreM = t.match(/점수:\s*(\d+)/), feedM = t.match(/피드백:\s*([\s\S]+?)$/);
       if (scoreM) {
-        const score = Math.max(0, Math.min(100, +scoreM[1]));
+        const score = Math.max(5, Math.min(100, +scoreM[1]));
         return { score, grade: scoreToGrade(score), feedback: feedM ? feedM[1].trim() : t, src: 'AI 채점' };
       }
     } catch (e) { if (e && e.code === 'not_granted') aiOff = true; }
@@ -1664,14 +1652,15 @@ async function judge(sc, msgs) {
   return Object.assign(ruleEvaluate(staff), { src: '규칙 채점' });
 }
 function ruleEvaluate(staffMsgs) {
-  if (!staffMsgs.length) return { score: 0, grade: 'C', feedback: '직원 응답이 없습니다.' };
+  if (!staffMsgs.length) return { score: 5, grade: 'C', feedback: '직원 응답이 없습니다.' };
   const cnt = words => staffMsgs.reduce((n, m) => n + words.filter(w => m.includes(w)).length, 0);
   let score = 50;
   score += Math.min(cnt(['죄송', '불편', '이해', '공감', '안타깝', '걱정', '힘드셨', '불쾌']) * 5, 20);
   score += Math.min(cnt(['확인', '처리', '도와', '해결', '조치', '안내', '대신', '바꿔']) * 4, 15);
   score += Math.min(cnt(['고객님', '말씀', '주시면', '드리겠', '부탁', '감사']) * 3, 15);
   score -= cnt(['안돼요', '못해요', '어쩔 수 없', '몰라요']) * 5;
-  score = Math.max(0, Math.min(100, score));
+  score -= staffMsgs.filter(m => hangulLen(m) < 4).length * 25;   // 의미 없는 답(ㅈㅅ, ㅋㅋ 등)
+  score = Math.max(5, Math.min(100, score));
   const grade = scoreToGrade(score);
   const fb = {
     S: '완벽한 응대였습니다! 고객 공감, 문제 해결, 전문성 모든 면에서 최고 수준을 보여주셨습니다.',
