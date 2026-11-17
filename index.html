@@ -1506,7 +1506,7 @@ function renderTalk(p, typing) {
     <div class="answer"><textarea id="ans" rows="2" placeholder="고객에게 응대하세요..." ${typing ? 'disabled' : ''}></textarea>
       <button class="mic" id="micBtn" type="button" aria-label="말로 입력" ${dict && !dictOff ? '' : 'hidden'}>${MIC_SVG}</button></div>
     <div class="partial" id="partial"></div>
-    ${t >= 5 ? '<div class="guide">💡 응대가 어느 정도 마무리됐어요. 평가를 받거나 더 연습하고 싶으면 계속 응대해 주세요.</div>' : ''}
+    ${t === MAX_TURNS - 1 ? '<div class="guide">💡 다음 응대가 마지막이에요. 지금 평가를 받거나, 한 번 더 응대하면 바로 평가로 넘어가요.</div>' : ''}
     <div class="actions"><button class="btn" id="sendAns" ${typing ? 'disabled' : ''}>보내기</button>${p.canEval ? `<button class="btn ghost" id="evalBtn" ${typing ? 'disabled' : ''}>📊 평가 받기</button>` : ''}<span class="turns">${t}회 응대</span></div>`;
   $('modal').hidden = false;
   const cb = $('chatbox'); cb.scrollTop = cb.scrollHeight;
@@ -1524,7 +1524,8 @@ function renderTalk(p, typing) {
     if (text.length < 2) { partialEl.textContent = '고객에게 할 말을 적어 주세요.'; ansBox.focus(); return; }
     stopMic();
     p.msgs.push({ role: 'user', content: text }); p.turns++;
-    if ((p.turns >= 3 && goodAnswer(text)) || p.turns >= 6) p.canEval = true;
+    if ((p.turns >= 3 && goodAnswer(text)) || p.turns >= 4) p.canEval = true;
+    if (p.turns >= MAX_TURNS) { startEval(p); return; }      // 마지막 답: 고객 대답 없이 바로 평가 (토큰 절약)
     renderTalk(p, true);
     let reply;
     try { reply = await customerReply(p); } catch (e) { reply = '(응답 오류. 다시 말씀해 주세요.)'; }
@@ -1532,12 +1533,14 @@ function renderTalk(p, typing) {
     p.msgs.push({ role: 'assistant', content: reply });
     renderTalk(p, false);
   };
-  if ($('evalBtn')) $('evalBtn').onclick = () => {
-    stopMic();
-    const pending = judge(sc, p.msgs);
-    dlg.innerHTML = speakerHtml(sc) + `<div class="thinking"><span class="dots"><i></i><i></i><i></i></span>평가하고 있어요</div>`;
-    pending.then(res => showResult(p, res));
-  };
+  if ($('evalBtn')) $('evalBtn').onclick = () => startEval(p);
+}
+const MAX_TURNS = 5;
+function startEval(p) {
+  stopMic();
+  const pending = judge(p.sc, p.msgs);
+  dlg.innerHTML = speakerHtml(p.sc) + `${p.turns >= MAX_TURNS ? '<div class="guide">응대 횟수를 다 채워서 바로 평가할게요.</div>' : ''}<div class="thinking"><span class="dots"><i></i><i></i><i></i></span>평가하고 있어요</div>`;
+  pending.then(res => showResult(p, res));
 }
 // 좋은 대답(토큰 없이 판단): 공감이나 해결 표현이 있고, 거절 표현이 없고, 너무 짧지 않음
 const hangulLen = t => (t.match(/[가-힣]/g) || []).length;
