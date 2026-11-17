@@ -65,6 +65,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 .hud .store { font-size: 12px; color: var(--muted); }
 
 .scen { font-size: 13px; color: var(--muted); background: var(--floor); border-radius: 10px; padding: 6px 12px; }
+.chatbox { max-height: 38vh; overflow-y: auto; display: grid; gap: 8px; padding: 2px; }
+.cm span { display: block; font-size: 11px; color: var(--muted); margin-bottom: 2px; }
+.cm p { margin: 0; padding: 9px 12px; border-radius: 12px; font-size: 15px; line-height: 1.5; max-width: 85%; }
+.cm.cust p { background: var(--floor); border-top-left-radius: 4px; }
+.cm.me { justify-self: end; text-align: right; }
+.cm.me p { background: var(--uniform-soft); border-top-right-radius: 4px; margin-left: auto; text-align: left; }
+.guide { font-size: 13px; background: #fff7e0; border-radius: 10px; padding: 8px 12px; }
+.turns { font-size: 12px; color: var(--muted); align-self: center; margin-left: auto; }
 .grade-row { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
 .grade { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; font-family: var(--display); font-size: 24px; color: #fff; flex: none; }
 .grade.sm { width: 24px; height: 24px; font-size: 14px; }
@@ -1496,38 +1504,96 @@ const MIC_SVG = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" str
 const GRADE_LABELS = { S: '완벽', A: '우수', B: '양호', C: '개선 필요' };
 function speakerHtml(sc) {
   return `<div class="speaker"><span class="kind">고객 · ${esc(sc.ctype)}</span><strong>Lv.${sc.lv} ${esc(DIFFS[sc.lv - 1].title)}</strong></div>
-    <div class="scen">📋 ${esc(sc.situation)} · ${esc(sc.ctype)}</div>
-    <p class="say">“${esc(sc.say)}”</p>`;
+    <div class="scen">📋 ${esc(sc.situation)} · ${esc(sc.ctype)}</div>`;
+}
+// GST처럼 여러 번 주고받는 대화. 3번 이상 응대하면 [평가 받기], 5번이면 마무리 안내.
+function chatHtml(p) {
+  return p.msgs.map(m => m.role === 'assistant'
+    ? `<div class="cm cust"><span>고객</span><p>${esc(m.content)}</p></div>`
+    : `<div class="cm me"><span>${esc(S.name)} (나)</span><p>${esc(m.content)}</p></div>`).join('');
 }
 function openTalk(p) {
   paused = true; p.state = 'talk'; if (p.el) p.el.hidden = true;
   P.face = Math.atan2(p.x - P.x, p.z - P.z); playerMesh.rotation.y = P.face;
-  const sc = p.sc;
-  dlg.innerHTML = speakerHtml(sc) + `
-    <label class="label" for="ans">내 응대 입력</label>
-    <div class="answer"><textarea id="ans" rows="3" placeholder="고객에게 할 말을 그대로 적어 보세요"></textarea>
+  if (!p.msgs) { p.msgs = [{ role: 'assistant', content: p.sc.say }]; p.turns = 0; }
+  renderTalk(p, false);
+}
+function renderTalk(p, typing) {
+  const sc = p.sc, t = p.turns;
+  dlg.innerHTML = speakerHtml(sc, true) + `
+    <div class="chatbox" id="chatbox">${chatHtml(p)}${typing ? '<div class="cm cust"><span>고객</span><p><span class="dots"><i></i><i></i><i></i></span></p></div>' : ''}</div>
+    <div class="answer"><textarea id="ans" rows="2" placeholder="고객에게 응대하세요..." ${typing ? 'disabled' : ''}></textarea>
       <button class="mic" id="micBtn" type="button" aria-label="말로 입력" ${dict && !dictOff ? '' : 'hidden'}>${MIC_SVG}</button></div>
     <div class="partial" id="partial"></div>
-    <div class="actions"><button class="btn" id="sendAns">응대하기</button></div>`;
+    ${t >= 5 ? '<div class="guide">💡 응대가 어느 정도 마무리됐어요. 평가를 받거나 더 연습하고 싶으면 계속 응대해 주세요.</div>' : ''}
+    <div class="actions"><button class="btn" id="sendAns" ${typing ? 'disabled' : ''}>보내기</button>${t >= 3 ? `<button class="btn ghost" id="evalBtn" ${typing ? 'disabled' : ''}>📊 평가 받기</button>` : ''}<span class="turns">${t}회 응대</span></div>`;
   $('modal').hidden = false;
+  const cb = $('chatbox'); cb.scrollTop = cb.scrollHeight;
   ansBox = $('ans'); micBtn = $('micBtn'); partialEl = $('partial');
+  if (typing) return;
   ansBox.focus();
+  ansBox.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('sendAns').click(); } };
   micBtn.onclick = () => {
     if (!dict) return;
     if (listening) { dict.stop().catch(() => {}); return; }
     dict.start().catch(err => { if (err && err.code === 'not_granted') { dictOff = true; micBtn.hidden = true; } });
   };
-  $('sendAns').onclick = () => {
+  $('sendAns').onclick = async () => {
     const text = ansBox.value.trim();
-    if (text.length < 4) { partialEl.textContent = '조금 더 적어 주세요. 실제로 고객에게 하는 말 그대로요.'; ansBox.focus(); return; }
+    if (text.length < 2) { partialEl.textContent = '고객에게 할 말을 적어 주세요.'; ansBox.focus(); return; }
     stopMic();
-    const pending = judge(sc, text);
-    dlg.innerHTML = speakerHtml(sc) + `<div class="mine"><span class="label">내 응대</span><p>${esc(text)}</p></div><div class="thinking"><span class="dots"><i></i><i></i><i></i></span>채점하고 있어요</div>`;
-    pending.then(res => showResult(p, res, text));
+    p.msgs.push({ role: 'user', content: text }); p.turns++;
+    renderTalk(p, true);
+    let reply;
+    try { reply = await customerReply(p); } catch (e) { reply = '(응답 오류. 다시 말씀해 주세요.)'; }
+    if (p.state !== 'talk') return;
+    p.msgs.push({ role: 'assistant', content: reply });
+    renderTalk(p, false);
+  };
+  if ($('evalBtn')) $('evalBtn').onclick = () => {
+    stopMic();
+    const pending = judge(sc, p.msgs);
+    dlg.innerHTML = speakerHtml(sc) + `<div class="thinking"><span class="dots"><i></i><i></i><i></i></span>평가하고 있어요</div>`;
+    pending.then(res => showResult(p, res));
   };
 }
+// 토큰 없는 손님(처음 2명)의 대답: 직원 말에 공감·해결 표현이 있는지로 고른다.
+function ruleReply(p) {
+  const last = p.msgs[p.msgs.length - 1].content, t = p.turns;
+  const has = ws => ws.some(w => last.includes(w));
+  const empathy = has(['죄송', '불편', '이해', '공감', '안타깝', '걱정', '힘드셨', '불쾌']);
+  const solve = has(['확인', '처리', '도와', '해결', '조치', '안내', '대신', '바꿔']);
+  const neg = has(['안돼요', '못해요', '어쩔 수 없', '몰라요']);
+  if (t === 1 && !neg) return '그게요, 지금 너무 답답해서 그래요. 어떻게 해주실 거예요?';
+  if (neg) return '지금 안 된다는 말만 하시는 거예요? 다른 방법을 알려 주세요.';
+  if (empathy && solve) return t >= 3 ? '알겠어요. 그럼 그렇게 처리해 주세요.' : '네... 그럼 빨리 좀 확인해 주세요.';
+  if (solve) return '그래서 정확히 언제, 어떻게 해주시는 건데요?';
+  if (empathy) return '말만 그렇게 하지 말고 어떻게 해결해 줄 건지 알려 주세요.';
+  return '지금 제 말 제대로 듣고 계신 거 맞아요?';
+}
+async function customerReply(p) {
+  const sc = p.sc;
+  if (sc.free) { await new Promise(r => setTimeout(r, 600)); return ruleReply(p); }
+  if (SERVER && !serverOff && sc.server) {
+    const r = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ job_type: S.role, difficulty: sc.lv, messages: p.msgs, scenario: sc.server }) });
+    const d = await r.json(); if (d.message) return d.message;
+    throw new Error('no message');
+  }
+  if (samp && !aiOff) {
+    const conv = p.msgs.map(m => (m.role === 'assistant' ? '고객: ' : '직원: ') + m.content).join('\n');
+    const prompt = `당신은 백화점 ${JOBS[S.role].place}을 방문한 실제 고객입니다. 고객 유형: ${sc.ctype} (${sc.cdesc}). 겪은 상황: ${sc.situation}. 감정: ${sc.emotion}. 강도: Level ${sc.lv}.
+직원이 잘 응대하면 감정이 조금씩 누그러지고, 잘못 응대하면 더 강하게 반응하세요. 대화가 5~6회 진행되면 자연스럽게 마무리하세요. 2~3문장, 별표 행동 묘사 금지, 고객의 말만 출력.
 
-function showResult(p, res, myText) {
+대화:
+${conv}
+고객:`;
+    const r = await samp(prompt, { modelTier: 'quick' });
+    const t = String((r && (r.text || r.content)) || '').trim(); if (t) return t;
+  }
+  return ruleReply(p);
+}
+
+function showResult(p, res) {
   const s = res.grade === 'S' || res.grade === 'A' ? 2 : res.grade === 'B' ? 1 : 0;
   const gain = [0, 12, 30][s], dc = [-8, 1, 6][s];
   S.xp += gain; S.csat = Math.max(0, Math.min(100, S.csat + dc)); p.score = s;
@@ -1536,8 +1602,7 @@ function showResult(p, res, myText) {
   const lvBefore = S.level; while (S.xp >= need(S.level)) { S.xp -= need(S.level); S.level += 1; }
   const lvUp = S.level > lvBefore;
   dlg.innerHTML = speakerHtml(p.sc) +
-    `<div class="mine"><span class="label">내 응대</span><p>${esc(myText)}</p></div>
-     <div class="fb g${s}"><div class="grade-row"><span class="grade ${res.grade}">${res.grade}</span><b>${res.score}점 · ${GRADE_LABELS[res.grade]} · +${gain} XP</b></div><p>${esc(res.feedback)}</p></div>
+    `<div class="fb g${s}"><div class="grade-row"><span class="grade ${res.grade}">${res.grade}</span><b>${res.score}점 · ${GRADE_LABELS[res.grade]} · +${gain} XP</b></div><p>${esc(res.feedback)}</p></div>
      <div class="src">${esc(res.src)}</div>
      ${lvUp ? `<div class="fb g2"><b>레벨 업! Lv.${S.level} ${titleOf(S.level)}</b>${S.level >= 6 ? '왕관을 얻었어요. 이제 GST 마스터예요.' : S.level >= 5 ? '이름표가 금색으로 바뀌었어요.' : '경험이 쌓이고 있어요.'}</div>` : ''}
      <button class="btn" id="nextBtn">다음 손님</button>`;
@@ -1573,16 +1638,17 @@ C등급: 70점 미만 (추가 교육 필요)
 점수: [0-100 숫자만]
 피드백: [3~5문장. 잘한 점과 개선점 모두 포함]`;
 const scoreToGrade = sc => sc >= 98 ? 'S' : sc >= 85 ? 'A' : sc >= 70 ? 'B' : 'C';
-async function judge(sc, text) {
-  if (sc.free) return Object.assign(ruleEvaluate([text]), { src: '규칙 채점' });
+async function judge(sc, msgs) {
+  const staff = msgs.filter(m => m.role === 'user').map(m => m.content);
+  if (sc.free) return Object.assign(ruleEvaluate(staff), { src: '규칙 채점' });
   if (SERVER && !serverOff) {
     try {
-      const r = await fetch('/api/evaluate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ job_type: S.role, difficulty: sc.lv, scenario: sc.server || { situation: sc.situation, customer_type: sc.ctype }, messages: [{ role: 'assistant', content: sc.say }, { role: 'user', content: text }] }) });
+      const r = await fetch('/api/evaluate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ job_type: S.role, difficulty: sc.lv, scenario: sc.server || { situation: sc.situation, customer_type: sc.ctype }, messages: msgs }) });
       if (r.ok) { const d = await r.json(); if (d.grade) return { score: d.score, grade: scoreToGrade(d.score), feedback: d.feedback, src: d.ai ? 'AI 채점' : '규칙 채점' }; }
     } catch (e) { }
   }
   if (samp && !aiOff) {
-    const conv = `고객(AI): ${sc.say}\n직원(피훈련자): ${text}`;
+    const conv = msgs.map(m => `${m.role === 'assistant' ? '고객(AI)' : '직원(피훈련자)'}: ${m.content}`).join('\n');
     const scen = `직무: ${S.role}\n난이도: Level ${sc.lv}\n시나리오: ${sc.situation}\n고객유형: ${sc.ctype}`;
     const prompt = `${EVAL_CRITERIA}\n\n시나리오:\n${scen}\n\n대화:\n${conv}`;
     try {
@@ -1595,7 +1661,7 @@ async function judge(sc, text) {
       }
     } catch (e) { if (e && e.code === 'not_granted') aiOff = true; }
   }
-  return Object.assign(ruleEvaluate([text]), { src: '규칙 채점 (AI 연결 전)' });
+  return Object.assign(ruleEvaluate(staff), { src: '규칙 채점' });
 }
 function ruleEvaluate(staffMsgs) {
   if (!staffMsgs.length) return { score: 0, grade: 'C', feedback: '직원 응답이 없습니다.' };
