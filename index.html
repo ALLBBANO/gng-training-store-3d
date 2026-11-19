@@ -1524,7 +1524,7 @@ function renderTalk(p, typing) {
     if (text.length < 2) { partialEl.textContent = '고객에게 할 말을 적어 주세요.'; ansBox.focus(); return; }
     stopMic();
     p.msgs.push({ role: 'user', content: text }); p.turns++;
-    if ((p.turns >= 3 && goodAnswer(text)) || p.turns >= 4) p.canEval = true;
+    if (p.turns >= 3) p.canEval = true;                     // 3번째 답부터 평가 받기
     if (p.turns >= MAX_TURNS) { startEval(p); return; }      // 마지막 답: 고객 대답 없이 바로 평가 (토큰 절약)
     renderTalk(p, true);
     let reply;
