@@ -1294,7 +1294,7 @@ async function serverScenario(role, lv) {
   const sc = generateScenario(role, lv);
   return Object.assign(sc, { ctype: d.scenario.customer_type, cdesc: d.scenario.customer_desc, situation: d.scenario.situation, emotion: d.scenario.emotion, say: d.message, server: d.scenario });
 }
-// 손님 상황은 규칙으로 고르고(토큰 없음), 고객의 1·2번째 말은 규칙 문장, 3번째 말부터 AI가 만든다.
+// 손님 상황은 규칙으로 고르고(토큰 없음), 고객 첫마디는 기본 문장, 2번째 말부터 AI가 본론을 말한다.
 let genCount = 0;
 async function refillScenarios() {
   const role = S.role, lv = curDiff();
@@ -1565,7 +1565,6 @@ function ruleReply(p) {
 }
 async function customerReply(p) {
   const sc = p.sc;
-  if (p.turns <= 1) { await new Promise(r => setTimeout(r, 600)); return ruleReply(p); }
   if (SERVER && !serverOff && sc.server) {
     const r = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ job_type: S.role, difficulty: sc.lv, messages: p.msgs, scenario: sc.server }) });
     const d = await r.json(); if (d.message) return d.message;
